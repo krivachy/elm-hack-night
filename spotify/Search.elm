@@ -9,6 +9,7 @@ import Http
 import Json.Decode as Json exposing ((:=))
 import Task
 import Signal exposing (message,forwardTo,Address)
+import Graphics.Input exposing (clickable)
 
 
 
@@ -17,18 +18,20 @@ import Signal exposing (message,forwardTo,Address)
 
 type alias Model =
     { query : String
+    , albumId : String
     , answers : List Answer
     }
 
 
 type alias Answer =
     { name : String
+    , id: String
     }
 
 
 init : (Model, Effects Action)
 init =
-  ( Model "" []
+  ( Model "" "" []
   , Effects.none
   )
 
@@ -41,13 +44,14 @@ type Action
     = QueryChange String
     | Query
     | RegisterAnswers (Maybe (List Answer))
+    | FindTracks String
 
 
 update : Action -> Model -> (Model, Effects Action)
 update action model =
   case action of
     QueryChange newQuery ->
-      ( Model newQuery model.answers
+      ( Model newQuery model.albumId model.answers
       , Effects.none
       )
 
@@ -57,8 +61,13 @@ update action model =
       )
 
     RegisterAnswers maybeAnswers ->
-      ( Model model.query (Maybe.withDefault [] maybeAnswers)
+      ( Model model.query model.albumId (Maybe.withDefault [] maybeAnswers)
       , Effects.none
+      )
+
+    FindTracks albumId ->
+      ( Model model.query albumId model.answers
+      , getTracks albumId
       )
 
 
@@ -110,13 +119,13 @@ resultsList address model =
     toEntry answer =
       div
         [class "col-xs-2 col-md-3"]
-        [resultView answer]
+        [resultView address answer]
   in
     row (List.map toEntry model.answers)
 
 
-resultView : Answer -> Html
-resultView answer =
+-- resultView : Signal.Address -> Answer -> Html
+resultView address answer =
   div [class "panel panel-info"]
       [ div
           [class "panel-heading"]
@@ -125,7 +134,10 @@ resultView answer =
           [ class "panel-body"
           , style [("height", "10rem")]
           ]
+      [ div
+          [onClick address (FindTracks (answer.id))]
           [text answer.name]
+          ]
       ]
 
 
@@ -134,6 +146,8 @@ resultView answer =
 
 
 (=>) = (,)
+
+
 
 
 search : String -> Effects Action
@@ -151,11 +165,27 @@ searchUrl query =
     , "type" => "album"
     ]
 
+getTracks : String -> Effects Action
+getTracks albumId =
+  Http.get decodeTracks (tracksUrl albumId)
+    |> Task.toMaybe
+    |> Task.map RegisterAnswers
+    |> Effects.task
+
+tracksUrl : String -> String
+tracksUrl albumId =
+  Http.url ("https://api.spotify.com/v1/albums/" ++ albumId ++ "/tracks") []
+
+decodeAnswer : Json.Decoder Answer
+decodeAnswer =
+  Json.object2 Answer
+    ("name" := Json.string)
+    ("id" := Json.string)
 
 decodeAnswers : Json.Decoder (List Answer)
 decodeAnswers =
-  let
-    albumName =
-      Json.map Answer ("name" := Json.string)
-  in
-    (Json.at ["albums", "items"] (Json.list albumName))
+    Json.at ["albums", "items"] (Json.list decodeAnswer)
+
+decodeTracks : Json.Decoder (List Answer)
+decodeTracks =
+    Json.at ["items"] (Json.list decodeAnswer)
